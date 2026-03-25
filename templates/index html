@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Extractor | Anurag Mishra</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background: #ffffff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 450px;
+            text-align: center;
+        }
+        h2 {
+            color: #1877f2;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+        p.subtitle {
+            color: #606770;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border: 1px solid #ccd0d5;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-family: 'Poppins', sans-serif;
+            outline: none;
+        }
+        input:focus {
+            border-color: #1877f2;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background-color: #1877f2;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background-color: #166fe5;
+        }
+        button:disabled {
+            background-color: #a0c3ff;
+            cursor: not-allowed;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .error {
+            color: #e53935;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        
+        /* Token Box Styles */
+        .token-container {
+            margin-top: 20px;
+            text-align: left;
+        }
+        .token-container label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+            margin-top: 10px;
+            display: block;
+        }
+        textarea {
+            width: 100%;
+            height: 90px;
+            margin-top: 5px;
+            padding: 10px;
+            border: 2px solid #2ecc71;
+            border-radius: 6px;
+            box-sizing: border-box;
+            resize: none;
+            font-family: monospace;
+            font-size: 12px;
+            background-color: #f9fff9;
+            word-break: break-all;
+        }
+        .copy-btn {
+            background-color: #2ecc71;
+            margin-top: 5px;
+            padding: 8px;
+            font-size: 14px;
+        }
+        .copy-btn:hover {
+            background-color: #27ae60;
+        }
+        .footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Token Extractor</h2>
+        <p class="subtitle">Developed by Anurag Mishra</p>
+        
+        <form id="loginForm">
+            <input type="text" id="uid" name="uid" placeholder="Email, Phone or UID" required>
+            <input type="password" id="password" name="password" placeholder="Password" required>
+            <button type="submit" id="loginBtn">Extract Tokens</button>
+        </form>
+
+        <form id="twoFactorForm" class="hidden">
+            <p style="color: #d35400; font-weight: 600; font-size: 14px; margin-bottom: 5px;">2FA Required!</p>
+            <p style="color: #666; font-size: 12px; margin-top: 0;">Enter OTP from your authenticator app.</p>
+            <input type="text" id="otp" name="otp" placeholder="Enter 6-digit OTP" required>
+            <button type="submit" id="otpBtn">Verify & Extract</button>
+        </form>
+
+        <div id="errorMsg" class="error"></div>
+
+        <div id="resultBox" class="token-container hidden">
+            <label>Master Token (EAAG...)</label>
+            <textarea id="token1Output" readonly></textarea>
+            <button class="copy-btn" onclick="copyToken('token1Output')">Copy EAAG Token</button>
+
+            <label style="margin-top: 15px;">App Token (EAAB...)</label>
+            <textarea id="token2Output" readonly></textarea>
+            <button class="copy-btn" onclick="copyToken('token2Output')">Copy EAAB Token</button>
+            
+            <button style="background-color: #e74c3c; margin-top: 20px;" onclick="resetForm()">Extract Another Account</button>
+        </div>
+
+        <div class="footer">For Advanced Bot Usage Only.</div>
+    </div>
+
+    <script>
+        let currentSessionId = "";
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            // FormData will now correctly pick up 'uid' and 'password' because of the name attribute
+            submitData('/login', new FormData(document.getElementById('loginForm')), 'loginBtn');
+        });
+
+        document.getElementById('twoFactorForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('session_id', currentSessionId);
+            formData.append('otp', document.getElementById('otp').value);
+            submitData('/two_factor', formData, 'otpBtn');
+        });
+
+        async function submitData(endpoint, formData, btnId) {
+            const btn = document.getElementById(btnId);
+            const errorMsg = document.getElementById('errorMsg');
+            
+            btn.innerText = "Processing...";
+            btn.disabled = true;
+            errorMsg.innerText = "";
+
+            try {
+                const response = await fetch(endpoint, { method: 'POST', body: formData });
+                const data = await response.json();
+
+                if (data.token1) {
+                    // Show both tokens
+                    document.getElementById('token1Output').value = data.token1;
+                    document.getElementById('token2Output').value = data.token2;
+                    
+                    document.getElementById('loginForm').classList.add('hidden');
+                    document.getElementById('twoFactorForm').classList.add('hidden');
+                    document.getElementById('resultBox').classList.remove('hidden');
+                } else if (data.two_factor) {
+                    currentSessionId = data.session_id;
+                    document.getElementById('loginForm').classList.add('hidden');
+                    document.getElementById('twoFactorForm').classList.remove('hidden');
+                } else {
+                    errorMsg.innerText = data.error || "Failed!";
+                }
+            } catch (err) {
+                errorMsg.innerText = "Server Error!";
+            }
+            
+            btn.innerText = btnId === 'loginBtn' ? "Extract Tokens" : "Verify & Extract";
+            btn.disabled = false;
+        }
+
+        function copyToken(elementId) {
+            const tokenOutput = document.getElementById(elementId);
+            tokenOutput.select();
+            document.execCommand("copy");
+            alert("Token Copied!");
+        }
+
+        function resetForm() {
+            document.getElementById('loginForm').reset();
+            document.getElementById('twoFactorForm').reset();
+            document.getElementById('resultBox').classList.add('hidden');
+            document.getElementById('loginForm').classList.remove('hidden');
+            currentSessionId = "";
+        }
+    </script>
+</body>
+</html>
