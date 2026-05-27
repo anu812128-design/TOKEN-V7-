@@ -924,21 +924,39 @@ def login():
         
         if 'error' in res_data:
             err = res_data['error']
-            error_msg = err.get('message', '').lower()
-            
+            error_msg = str(err.get('message', '')).lower()
+            err_data = err.get('error_data', {}) if isinstance(err.get('error_data', {}), dict) else {}
+            err_code = err.get('code')
+
             if 'abusive' in error_msg:
                 return jsonify({'error': 'Server IP flagged. Try later.'})
-            
-            if 'approval' in error_msg or err.get('code') == 459 or 'login_first_factor' in err.get('error_data', {}):
+
+            # Facebook may require 2FA via different codes/messages across endpoints/app versions.
+            two_factor_signals = [
+                'approval',
+                'two-factor',
+                '2fa',
+                'login approval',
+                'login approvals',
+                'authentication code',
+                'checkpoint',
+            ]
+            is_two_factor_required = (
+                any(signal in error_msg for signal in two_factor_signals)
+                or err_code in [401, 403, 406, 459]
+                or bool(err_data.get('login_first_factor'))
+            )
+
+            if is_two_factor_required:
                 sid = str(uuid.uuid4())
                 sessions_data[sid] = {
                     'uid': uid,
-                    'err_data': err.get('error_data', {}),
+                    'err_data': err_data,
                     'headers': headers,
                     'data': data
                 }
                 return jsonify({'two_factor': True, 'session_id': sid})
-            
+
             return jsonify({'error': err.get('message', 'Login failed')})
             
     except Exception as e:
