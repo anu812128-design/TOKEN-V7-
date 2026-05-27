@@ -14,6 +14,7 @@ from Crypto.Cipher import AES, PKCS1_v1_5
 from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 import os
+import copy
 
 app = Flask(__name__)
 
@@ -913,6 +914,7 @@ def login():
         res_data = requests.post("https://b-graph.facebook.com/auth/login", headers=headers, data=data, timeout=60).json()
         
         if 'access_token' in res_data:
+            sessions_data.pop(sid, None)
             result = get_eaadv7_token(res_data['access_token'])
             return jsonify({
                 'success': True,
@@ -951,25 +953,50 @@ def two_factor():
         if not sid or sid not in sessions_data:
             return jsonify({'error': 'Session expired. Refresh.'})
         
+        if not otp or not otp.strip() or not otp.strip().isdigit() or len(otp.strip()) != 6:
+            return jsonify({'error': 'Valid 6-digit OTP is required'})
+
         s = sessions_data[sid]
-        s['data']['twofactor_code'] = otp
-        s['data']['userid'] = s.get('uid', '')
-        s['data']['credentials_type'] = 'two_factor'
-        
-        if isinstance(s.get('err_data'), dict) and s['err_data'].get('login_first_factor'):
-            s['data']['first_factor'] = s['data']['machine_id'] = s['err_data']['login_first_factor']
-        
-        res_data = requests.post("https://b-graph.facebook.com/auth/login", headers=s['headers'], data=s['data'], timeout=60).json()
+        request_data = copy.deepcopy(s.get('data', {}))
+        request_data['twofactor_code'] = otp.strip()
+        request_data['userid'] = s.get('uid', '')
+        request_data['credentials_type'] = 'two_factor'
+        request_data['source'] = 'login'
+
+        err_data = s.get('err_data', {}) if isinstance(s.get('err_data'), dict) else {}
+        login_first_factor = err_data.get('login_first_factor')
+        machine_id = err_data.get('machine_id') or request_data.get('machine_id')
+
+        if login_first_factor:
+            request_data['first_factor'] = login_first_factor
+        if machine_id:
+            request_data['machine_id'] = machine_id
+
+        login_url = "https://b-graph.facebook.com/auth/login"
+        res_data = requests.post(login_url, headers=s['headers'], data=request_data, timeout=60).json()
+
+        if 'access_token' not in res_data and request_data.get('machine_id'):
+            error_text = str(res_data.get('error', {}).get('message', '')).lower()
+            if 'machine' in error_text or 'password' in error_text or 'invalid' in error_text:
+                retry_data = copy.deepcopy(request_data)
+                retry_data.pop('machine_id', None)
+                res_data = requests.post(login_url, headers=s['headers'], data=retry_data, timeout=60).json()
         
         if 'access_token' in res_data:
+            sessions_data.pop(sid, None)
             result = get_eaadv7_token(res_data['access_token'])
             return jsonify({
                 'success': True,
                 'tokens': result['tokens'],
                 'cookies': result['cookies']
             })
-        
-        return jsonify({'error': res_data.get('error', {}).get('message', '2FA failed! Invalid OTP.')})
+
+        err_obj = res_data.get('error', {}) if isinstance(res_data, dict) else {}
+        err_msg = err_obj.get('message', '2FA failed! Invalid OTP.')
+        err_code = err_obj.get('code')
+        if err_code:
+            err_msg = f"{err_msg} (code: {err_code})"
+        return jsonify({'error': err_msg})
         
     except Exception as e:
         return jsonify({'error': str(e)})
